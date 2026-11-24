@@ -1,0 +1,514 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Level 1 Directs</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/ethers@6/dist/ethers.umd.min.js"></script>
+
+  <style>
+    :root {
+      --primary: #635bff;
+      --background: #f5f6fa;
+      --card: #fff;
+      --text: #202338;
+      --muted: #73798c;
+      --border: #e8eaf1;
+      --green: #12805c;
+      --red: #b54747;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 24px;
+      background: var(--background);
+      color: var(--text);
+      font: 15px/1.5 system-ui, sans-serif;
+    }
+
+    .container { max-width: 1100px; margin: auto; }
+
+    .top-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    a { color: var(--primary); text-decoration: none; }
+
+    button {
+      border: 0;
+      border-radius: 8px;
+      padding: 10px 14px;
+      background: var(--primary);
+      color: white;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    button:disabled { opacity: .6; cursor: wait; }
+
+    .header { margin-bottom: 20px; }
+    .header h1 { margin: 0; font-size: 26px; }
+    .header p { margin: 5px 0 0; color: var(--muted); }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin-bottom: 20px;
+    }
+
+    .stat, .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      box-shadow: 0 3px 14px #20233808;
+    }
+
+    .stat { padding: 16px; }
+    .stat-label { color: var(--muted); font-size: 13px; }
+    .stat-value { margin-top: 7px; font-size: 22px; font-weight: 700; }
+    .stat-sub { color: var(--muted); font-size: 13px; }
+
+    .card { overflow: hidden; }
+    .card-title { padding: 16px; font-weight: 700; border-bottom: 1px solid var(--border); }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; white-space: nowrap; }
+    th, td { padding: 12px 14px; text-align: left; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-size: 12px; }
+    .addr { font-family: monospace; }
+
+    .badge { padding: 4px 9px; border-radius: 20px; font-size: 12px; }
+    .badge.active { color: var(--green); background: #e7f6ef; }
+    .badge.inactive { color: var(--red); background: #fff0f0; }
+
+    .message { padding: 28px 16px; text-align: center; color: var(--muted); }
+    .progress-box { max-width: 400px; margin: 14px auto 0; }
+    .progress-track { height: 8px; background: var(--border); border-radius: 10px; overflow: hidden; }
+    .progress-bar { width: 0; height: 100%; background: var(--primary); transition: width .2s; }
+    .progress-text { margin-top: 7px; font-size: 13px; }
+
+    @media (max-width: 700px) {
+      body { padding: 14px; }
+      .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .header h1 { font-size: 22px; }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <div class="top-bar">
+      <a href="index.html">← Back</a>
+      <div>
+        <button id="connectBtn" type="button" onclick="connectWallet()">Connect Wallet</button>
+        <button id="refreshBtn" type="button" onclick="refreshData()" disabled>Refresh</button>
+      </div>
+    </div>
+
+    <header class="header">
+      <h1>LEVEL 1 DIRECTS</h1>
+      <p>Buy events scanned from the contract deployment block</p>
+    </header>
+
+    <section class="stats">
+      <div class="stat">
+        <div class="stat-label">Total Directs</div>
+        <div class="stat-value" id="total">0</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Active</div>
+        <div class="stat-value" id="active">0</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Holdings</div>
+        <div class="stat-value" id="sigma">0</div>
+        <div class="stat-sub" id="usdt">$0.00 estimated</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Buy Rate</div>
+        <div class="stat-value" id="rate">0.0000</div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-title">Your Direct Referrals</div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Wallet</th>
+              <th>Balance</th>
+              <th>Estimated USDT</th>
+              <th>Last Buy</th>
+              <th>Directs</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="body">
+            <tr><td colspan="7" class="message">Connect your wallet to load data.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    // Confirm this address is the correct Polygon contract.
+    const CONTRACT = "0xaF215838d156F7d348A6d56cA962cbC680A2153F";
+
+    // Deployment block provided by you.
+    const DEPLOYMENT_BLOCK = 96552904;
+
+    const RPCS = [
+      "https://polygon.llamarpc.com",
+      "https://polygon.drpc.org",
+      "https://rpc.ankr.com/polygon"
+    ];
+
+    const ABI = [
+      "function getCurrentBuyRate() view returns (uint256)",
+      "function balanceOf(address) view returns (uint256)",
+      "function decimals() view returns (uint8)",
+      "function users(address) view returns (address upline, uint256 directCount, uint256 lastBuyTimestamp, uint256, uint256, uint256, bool)",
+      "event Buy(address indexed user, uint256 amount, uint256 rate, uint256 usdtSpent)"
+    ];
+
+    // Smaller chunks are less likely to exceed public RPC log limits.
+    const BLOCK_CHUNK = 2000;
+    const CONCURRENCY = 3;
+
+    let provider;
+    let contract;
+    let userAddress = "";
+    let tokenDecimals = 18;
+    let buyRate = 0;
+
+    const $ = id => document.getElementById(id);
+
+    function escapeHTML(value) {
+      return String(value).replace(/[&<>"']/g, char => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+      })[char]);
+    }
+
+    function showMessage(message) {
+      $("body").innerHTML =
+        `<tr><td colspan="7" class="message">${escapeHTML(message)}</td></tr>`;
+    }
+
+    function showProgress(message, percent = 0) {
+      $("body").innerHTML = `
+        <tr>
+          <td colspan="7" class="message">
+            <div>${escapeHTML(message)}</div>
+            <div class="progress-box">
+              <div class="progress-track">
+                <div class="progress-bar" id="progressBar"></div>
+              </div>
+              <div class="progress-text" id="progressText"></div>
+            </div>
+          </td>
+        </tr>`;
+      updateProgress(percent, message);
+    }
+
+    function updateProgress(percent, message) {
+      const bar = $("progressBar");
+      const text = $("progressText");
+      if (bar) bar.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+      if (text) text.textContent = message;
+    }
+
+    async function makeReadProvider() {
+      for (const url of RPCS) {
+        try {
+          const candidate = new ethers.JsonRpcProvider(
+            url,
+            137,
+            { staticNetwork: true }
+          );
+          await candidate.getBlockNumber();
+          console.log("Connected to Polygon RPC:", url);
+          return candidate;
+        } catch (error) {
+          console.warn("RPC connection failed:", url, error);
+        }
+      }
+
+      throw new Error("Polygon RPC se connection nahi ho paya. Internet/RPC check karein.");
+    }
+
+    async function connectWallet() {
+      if (!window.ethereum) {
+        alert("MetaMask ya compatible Polygon wallet install/open karein.");
+        return;
+      }
+
+      $("connectBtn").disabled = true;
+
+      try {
+        const walletProvider = new ethers.BrowserProvider(window.ethereum);
+        let network = await walletProvider.getNetwork();
+
+        if (Number(network.chainId) !== 137) {
+          await window.ethereum.request({
+            method: "wallet_switchEthereumChain",
+            params: [{ chainId: "0x89" }]
+          });
+          network = await walletProvider.getNetwork();
+        }
+
+        if (Number(network.chainId) !== 137) {
+          throw new Error("Wallet Polygon network par nahi hai.");
+        }
+
+        const accounts = await walletProvider.send("eth_requestAccounts", []);
+        if (!accounts.length) throw new Error("Wallet account nahi mila.");
+
+        userAddress = accounts[0].toLowerCase();
+        $("connectBtn").textContent =
+          userAddress.slice(0, 6) + "..." + userAddress.slice(-4);
+
+        provider = await makeReadProvider();
+        contract = new ethers.Contract(CONTRACT, ABI, provider);
+
+        try {
+          tokenDecimals = Number(await contract.decimals());
+        } catch (error) {
+          console.warn("decimals() read nahi hua; 18 use kar rahe hain:", error);
+          tokenDecimals = 18;
+        }
+
+        $("refreshBtn").disabled = false;
+        await loadData();
+      } catch (error) {
+        console.error("Wallet connection error:", error);
+        alert("Connection failed: " + (error.shortMessage || error.message || error));
+      } finally {
+        $("connectBtn").disabled = false;
+      }
+    }
+
+    async function refreshData() {
+      if (!contract || !userAddress) {
+        await connectWallet();
+        return;
+      }
+
+      $("refreshBtn").disabled = true;
+      try {
+        await loadData();
+      } finally {
+        $("refreshBtn").disabled = false;
+      }
+    }
+
+    async function loadData() {
+      showProgress("Polygon se block number le rahe hain...");
+
+      try {
+        const currentBlock = await provider.getBlockNumber();
+
+        if (DEPLOYMENT_BLOCK > currentBlock) {
+          throw new Error("Deployment block current Polygon block se aage hai.");
+        }
+
+        try {
+          const rateBN = await contract.getCurrentBuyRate();
+          buyRate = Number(ethers.formatUnits(rateBN, 6));
+          $("rate").textContent = buyRate.toFixed(4);
+        } catch (error) {
+          console.error("Buy rate read failed:", error);
+          $("rate").textContent = "Unavailable";
+        }
+
+        const ranges = [];
+        for (let from = DEPLOYMENT_BLOCK; from <= currentBlock; from += BLOCK_CHUNK) {
+          ranges.push({
+            from,
+            to: Math.min(from + BLOCK_CHUNK - 1, currentBlock)
+          });
+        }
+
+        const buyers = new Set();
+        const failedRanges = [];
+
+        for (let i = 0; i < ranges.length; i += CONCURRENCY) {
+          const batch = ranges.slice(i, i + CONCURRENCY);
+
+          await Promise.all(batch.map(async range => {
+            try {
+              const events = await contract.queryFilter(
+                contract.filters.Buy(),
+                range.from,
+                range.to
+              );
+
+              for (const event of events) {
+                const buyer = event.args?.user;
+                if (buyer) buyers.add(buyer.toLowerCase());
+              }
+            } catch (error) {
+              failedRanges.push({ range, error: error.message });
+              console.error("Buy event scan failed:", range, error);
+            }
+          }));
+
+          const percent = Math.floor(((i + batch.length) / ranges.length) * 70);
+          updateProgress(
+            percent,
+            `Buy events scan: ${i + batch.length} / ${ranges.length} block ranges`
+          );
+        }
+
+        // A partial event scan could incorrectly display "No directs".
+        if (failedRanges.length > 0) {
+          console.error("Failed block ranges:", failedRanges);
+          showMessage(
+            `${failedRanges.length} block ranges scan nahi hue. Public RPC ne historical logs reject kiye; doosra RPC/indexer use karna hoga.`
+          );
+          return;
+        }
+
+        const addresses = [...buyers];
+        const directs = [];
+        let checked = 0;
+
+        for (let i = 0; i < addresses.length; i += 10) {
+          const batch = addresses.slice(i, i + 10);
+
+          await Promise.all(batch.map(async address => {
+            try {
+              const info = await contract.users(address);
+
+              if ((info.upline || "").toLowerCase() !== userAddress) return;
+
+              const balanceBN = await contract.balanceOf(address);
+              const balance = Number(
+                ethers.formatUnits(balanceBN, tokenDecimals)
+              );
+
+              // Estimated value only; assumes sell rate is 91% of buy rate.
+              const estimatedUSDT = balance * buyRate * 0.91;
+
+              directs.push({
+                address,
+                balance,
+                estimatedUSDT,
+                directCount: Number(info.directCount),
+                lastBuy: Number(info.lastBuyTimestamp)
+              });
+            } catch (error) {
+              console.error("Referral read failed:", address, error);
+            } finally {
+              checked++;
+            }
+          }));
+
+          const percent = 70 + Math.floor(
+            (checked / Math.max(1, addresses.length)) * 30
+          );
+
+          updateProgress(percent, `Wallets check: ${checked} / ${addresses.length}`);
+        }
+
+        directs.sort((a, b) => b.balance - a.balance);
+        renderTable(directs);
+      } catch (error) {
+        console.error("Data loading failed:", error);
+        showMessage("Data load error: " + (error.shortMessage || error.message || error));
+      }
+    }
+
+    function renderTable(directs) {
+      const totalBalance = directs.reduce((sum, item) => sum + item.balance, 0);
+      const totalUSDT = directs.reduce((sum, item) => sum + item.estimatedUSDT, 0);
+      const activeCount = directs.filter(item => item.estimatedUSDT >= 10).length;
+
+      $("total").textContent = directs.length;
+      $("active").textContent = activeCount;
+      $("sigma").textContent = totalBalance.toFixed(2);
+      $("usdt").textContent = "$" + totalUSDT.toFixed(2) + " estimated";
+
+      if (!directs.length) {
+        showMessage("Scanned Buy events mein aapke direct referrals nahi mile.");
+        return;
+      }
+
+      $("body").innerHTML = directs.map((item, index) => {
+        const date = item.lastBuy > 0
+          ? new Date(item.lastBuy * 1000).toLocaleDateString("en-IN", {
+              day: "2-digit",
+              month: "short",
+              year: "numeric"
+            })
+          : "—";
+
+        const active = item.estimatedUSDT >= 10;
+        const shortAddress =
+          item.address.slice(0, 7) + "..." + item.address.slice(-5);
+
+        return `
+          <tr>
+            <td>${index + 1}</td>
+            <td>
+              <span class="addr">${shortAddress}</span><br>
+              <button type="button" onclick="copyAddress('${item.address}')">Copy</button>
+              <a
+                href="https://polygonscan.com/address/${item.address}"
+                target="_blank"
+                rel="noopener"
+              >Explorer</a>
+            </td>
+            <td>${item.balance.toFixed(2)}</td>
+            <td>$${item.estimatedUSDT.toFixed(2)}</td>
+            <td>${date}</td>
+            <td>${item.directCount}</td>
+            <td>
+              <span class="badge ${active ? "active" : "inactive"}">
+                ${active ? "Active" : "Inactive"}
+              </span>
+            </td>
+          </tr>`;
+      }).join("");
+    }
+
+    async function copyAddress(address) {
+      try {
+        await navigator.clipboard.writeText(address);
+      } catch (error) {
+        console.error("Copy failed:", error);
+        alert("Copy nahi hua. Address manually copy karein: " + address);
+      }
+    }
+
+    if (window.ethereum) {
+      window.ethereum.on("accountsChanged", () => location.reload());
+      window.ethereum.on("chainChanged", () => location.reload());
+
+      window.addEventListener("load", async () => {
+        try {
+          const accounts = await window.ethereum.request({
+            method: "eth_accounts"
+          });
+          if (accounts.length > 0) connectWallet();
+        } catch (error) {
+          console.error("Connected wallet check failed:", error);
+        }
+      });
+    }
+  </script>
+</body>
+</html>
